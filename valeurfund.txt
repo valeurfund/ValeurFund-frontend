@@ -1,0 +1,1808 @@
+import os
+from pathlib import Path
+from datetime import date
+
+import numpy as np
+import pandas as pd
+import yfinance as yf
+import streamlit as st
+import streamlit.components.v1 as components
+from scipy import stats
+import plotly.graph_objects as go
+import plotly.express as px
+from PIL import Image, ImageDraw, ImageFont
+
+# ================== BRAND ==================
+TAGLINE_LINE1 = "Invest Intelligently."
+TAGLINE_LINE2 = "Grow Confidently."
+
+# ================== ACCESS ==================
+CONTENT_PASSWORD = "edodamarivaleurfund2026"
+
+# ================== COLORS ==================
+CLR_GOLD = "#b08a45"
+CLR_GOLD_LIGHT = "#d4b076"
+CLR_GOLD_SOFT = "#e7d4b0"
+CLR_TEXT = "#111111"
+CLR_TEXT_SOFT = "#4d4d4d"
+CLR_MUTED = "#6f675a"
+CLR_GREEN = "#17b26a"
+CLR_RED = "#f04438"
+CLR_BG = "rgba(255,255,255,0.98)"
+CLR_GRID = "rgba(191,163,106,0.10)"
+CLR_LINE = "rgba(191,163,106,0.16)"
+
+
+# ================== FAVICON ==================
+def generate_favicon():
+    size = 256
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.ellipse((0, 0, size, size), fill=(255, 255, 255, 255))
+    try:
+        font = ImageFont.truetype("arialbd.ttf", int(size * 0.6))
+    except Exception:
+        font = ImageFont.load_default()
+    text = "V"
+    bbox = draw.textbbox((0, 0), text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text(((size - tw) / 2, (size - th) / 2), text, fill=(0, 0, 0, 255), font=font)
+    return img
+
+
+# ================== CONFIG ==================
+st.set_page_config(
+    page_title="Valeur Fund",
+    page_icon=generate_favicon(),
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+OUT = Path("outputs")
+CSV_NAME = "combined_weights_monthly.csv"
+
+BENCH_SP500, BENCH_NDX = "^GSPC", "^NDX"
+TX_COST_BPS = 5
+INCLUDE_TX_COST = True
+MIN_YEAR = 2015
+
+
+# ================== CSS ==================
+st.markdown(
+    f"""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+html, body, [class*="css"] {{
+    font-family: Inter, sans-serif;
+    color: {CLR_TEXT};
+}}
+
+.stApp {{
+    background:
+        radial-gradient(circle at top left, rgba(191,163,106,0.08) 0%, rgba(191,163,106,0.00) 24%),
+        linear-gradient(180deg, #ffffff 0%, #fcfbf8 32%, #ffffff 68%, #f8f6f1 100%);
+}}
+
+.block-container {{
+    max-width: 1520px;
+    padding-top: 0.5rem;
+    padding-bottom: 1.3rem;
+    padding-left: 1.2rem;
+    padding-right: 1.2rem;
+}}
+
+section[data-testid="stSidebar"] {{
+    background: linear-gradient(180deg, #ffffff 0%, #fbfaf7 100%);
+    border-right: 1px solid rgba(191,163,106,0.22);
+}}
+
+section[data-testid="stSidebar"] * {{
+    color: #1a1a1a !important;
+}}
+
+header[data-testid="stHeader"] {{
+    background: rgba(0,0,0,0);
+    height: 0rem;
+}}
+
+#MainMenu, footer {{
+    visibility: hidden;
+}}
+
+.hero-wrap {{
+    text-align: center;
+    padding-top: 10px;
+    padding-bottom: 12px;
+    margin-bottom: 18px;
+}}
+
+.hero-main-title {{
+    font-size: 56px;
+    font-weight: 900;
+    color: {CLR_TEXT};
+    letter-spacing: -0.055em;
+    line-height: 1;
+    margin-bottom: 10px;
+    text-align: center;
+}}
+
+.hero-tagline {{
+    font-size: 22px;
+    font-weight: 500;
+    color: #6d5a33;
+    letter-spacing: 0.01em;
+    margin-bottom: 18px;
+}}
+
+.hero-copy {{
+    font-size: 31px;
+    line-height: 1.5;
+    font-weight: 400;
+    color: #2b2b2b;
+    max-width: 1180px;
+    margin: 0 auto;
+    letter-spacing: -0.03em;
+}}
+
+.hero-copy .hero-bold {{
+    font-weight: 900;
+    color: {CLR_TEXT};
+}}
+
+.hero-copy .hero-strong {{
+    font-weight: 800;
+    color: #9b7a3d;
+}}
+
+.section-card {{
+    background: linear-gradient(180deg, #ffffff 0%, #fcfbf8 100%);
+    border: 1px solid rgba(191,163,106,0.16);
+    border-radius: 22px;
+    box-shadow:
+        0 16px 34px rgba(0,0,0,0.04),
+        inset 0 1px 0 rgba(255,255,255,0.95);
+    padding: 20px;
+    margin-bottom: 14px;
+}}
+
+.section-title {{
+    text-align: center;
+    font-size: 29px;
+    line-height: 1.12;
+    font-weight: 800;
+    color: {CLR_TEXT};
+    letter-spacing: -0.03em;
+    margin-bottom: 16px;
+}}
+
+.strategy-card {{
+    min-height: 210px;
+    height: 210px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    background: linear-gradient(180deg, #ffffff 0%, #fcfbf8 100%);
+    border: 1px solid rgba(191,163,106,0.14);
+    border-radius: 20px;
+    box-shadow:
+        0 14px 28px rgba(0,0,0,0.04),
+        inset 0 1px 0 rgba(255,255,255,0.98);
+    padding: 24px 18px 20px 18px;
+    text-align: center;
+}}
+
+.strategy-card-title {{
+    font-size: 22px;
+    font-weight: 800;
+    color: {CLR_GOLD};
+    margin-bottom: 14px;
+    letter-spacing: -0.02em;
+}}
+
+.strategy-divider {{
+    height: 1px;
+    background: rgba(191,163,106,0.18);
+    margin: 0 0 14px 0;
+}}
+
+.strategy-text {{
+    font-size: 17px;
+    line-height: 1.55;
+    color: {CLR_TEXT_SOFT};
+}}
+
+.big-page-title {{
+    text-align: center;
+    font-size: 42px;
+    font-weight: 900;
+    color: {CLR_TEXT};
+    letter-spacing: -0.04em;
+    margin: 0 0 14px 0;
+}}
+
+.metric-box {{
+    background: linear-gradient(180deg, #ffffff 0%, #fcfbf8 100%);
+    border: 1px solid rgba(191,163,106,0.18);
+    border-radius: 16px;
+    box-shadow:
+        0 14px 24px rgba(0,0,0,0.04),
+        inset 0 1px 0 rgba(255,255,255,0.98);
+    padding: 14px 18px;
+    margin-bottom: 10px;
+    min-height: 88px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}}
+
+.metric-label-custom {{
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: {CLR_GOLD};
+    margin-bottom: 8px;
+    white-space: nowrap;
+}}
+
+.metric-value-custom {{
+    font-size: 28px;
+    line-height: 1.1;
+    font-weight: 900;
+    color: {CLR_TEXT};
+    letter-spacing: -0.03em;
+}}
+
+.chart-title {{
+    font-size: 20px;
+    font-weight: 800;
+    color: #1b1b1b;
+    margin-bottom: 10px;
+    letter-spacing: -0.01em;
+}}
+
+.subchart-title {{
+    font-size: 24px;
+    font-weight: 800;
+    color: {CLR_TEXT};
+    margin: 0 0 6px 0;
+    letter-spacing: -0.03em;
+}}
+
+div[data-baseweb="select"] > div,
+div[data-baseweb="input"] > div {{
+    border-radius: 12px !important;
+    border: 1px solid rgba(191,163,106,0.18) !important;
+    background: #ffffff !important;
+    color: {CLR_TEXT} !important;
+}}
+
+button[kind="primary"], button[kind="secondary"] {{
+    border-radius: 12px !important;
+    font-weight: 700 !important;
+}}
+
+[data-testid="stDataFrame"] {{
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid rgba(191,163,106,0.14);
+    box-shadow: 0 12px 22px rgba(0,0,0,0.04);
+}}
+
+.stPlotlyChart {{
+    margin-top: 0;
+}}
+
+.plot-container, .js-plotly-plot {{
+    border-radius: 16px;
+}}
+
+.small-note {{
+    font-size: 14px;
+    color: {CLR_MUTED};
+}}
+
+div[data-testid="stSegmentedControl"] {{
+    margin-top: 0.25rem;
+    margin-bottom: 1rem;
+}}
+
+div[data-testid="stSegmentedControl"] [role="radiogroup"] {{
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+}}
+
+div[data-testid="stSegmentedControl"] [role="radio"] {{
+    background: #ffffff !important;
+    border: 1px solid rgba(191,163,106,0.14) !important;
+    border-radius: 12px !important;
+    color: #3a3a3a !important;
+    font-weight: 700 !important;
+    padding: 0.45rem 1rem !important;
+    box-shadow: 0 8px 14px rgba(0,0,0,0.03);
+    transition: all 0.15s ease-in-out;
+}}
+
+div[data-testid="stSegmentedControl"] [role="radio"]:hover {{
+    border-color: rgba(191,163,106,0.30) !important;
+}}
+
+div[data-testid="stSegmentedControl"] [role="radio"][aria-checked="true"] {{
+    background: #fffaf0 !important;
+    color: {CLR_TEXT} !important;
+    border: 1px solid rgba(191,163,106,0.32) !important;
+    box-shadow:
+        inset 0 -3px 0 {CLR_GOLD},
+        0 10px 18px rgba(0,0,0,0.04) !important;
+}}
+
+label, .stMarkdown, .stText, .stCaption, .stSelectbox label, .stSlider label {{
+    color: #1f1f1f !important;
+}}
+
+div[data-testid="stExpander"] {{
+    border: 1px solid rgba(191,163,106,0.16);
+    border-radius: 16px;
+    background: linear-gradient(180deg, #ffffff 0%, #fcfbf8 100%);
+}}
+
+div[data-testid="stExpander"] summary {{
+    font-weight: 800 !important;
+    color: {CLR_GOLD} !important;
+}}
+
+.silent-pw-wrap {{
+    max-width: 260px;
+    margin: 24px auto 0 auto;
+}}
+
+@media (max-width: 1200px) {{
+    .hero-main-title {{ font-size: 42px; }}
+    .hero-tagline {{ font-size: 18px; }}
+    .hero-copy {{ font-size: 27px; }}
+    .big-page-title {{ font-size: 34px; }}
+}}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+
+# ================== HELPERS ==================
+def _month_end_index(idx):
+    idx = pd.to_datetime(idx, errors="coerce")
+    idx = idx[~pd.isna(idx)]
+    idx = pd.DatetimeIndex(idx).tz_localize(None)
+    idx = idx.to_period("M").to_timestamp(how="end").normalize()
+    return pd.DatetimeIndex(idx)
+
+
+def _month_start_index(idx):
+    idx = pd.to_datetime(idx, errors="coerce")
+    idx = idx[~pd.isna(idx)]
+    idx = pd.DatetimeIndex(idx).tz_localize(None)
+    idx = idx.to_period("M").to_timestamp(how="start").normalize()
+    return pd.DatetimeIndex(idx)
+
+
+def build_month_start_options(min_date: pd.Timestamp, max_date: pd.Timestamp):
+    start = pd.Timestamp(min_date).to_period("M").to_timestamp(how="start").normalize()
+    end = pd.Timestamp(max_date).to_period("M").to_timestamp(how="start").normalize()
+    return list(pd.date_range(start=start, end=end, freq="MS"))
+
+
+def build_month_end_trading_days(idx: pd.DatetimeIndex):
+    idx = pd.DatetimeIndex(pd.to_datetime(idx)).tz_localize(None)
+    s = pd.Series(idx, index=idx)
+    month_end_days = s.groupby(idx.to_period("M")).max()
+    return list(pd.DatetimeIndex(month_end_days.values))
+
+
+def load_combined_weights(path: Path):
+    if not path.exists():
+        raise FileNotFoundError(f"Missing: {path.resolve()}")
+
+    df = pd.read_csv(path, index_col=0)
+    df.index = _month_end_index(df.index)
+    df = df[~df.index.duplicated(keep="last")].sort_index()
+    df = df.apply(pd.to_numeric, errors="coerce").fillna(0.0)
+    df[df < 0] = 0.0
+
+    s = df.sum(axis=1).replace(0, np.nan)
+    df = df.div(s, axis=0).fillna(0.0)
+    df = df.loc[:, (df.sum(axis=0) > 0)]
+    return df
+
+
+@st.cache_data(show_spinner=False)
+def download_prices(tickers, start, end):
+    raw = yf.download(
+        tickers,
+        start=start,
+        end=end,
+        interval="1d",
+        auto_adjust=True,
+        progress=False,
+        group_by="column",
+        threads=True,
+    )
+    if raw is None or raw.empty:
+        return pd.DataFrame()
+
+    if isinstance(raw.columns, pd.MultiIndex):
+        if "Close" in raw.columns.get_level_values(0):
+            px_df = raw.xs("Close", axis=1, level=0, drop_level=True)
+        else:
+            px_df = raw.droplevel(0, axis=1)
+    else:
+        px_df = raw.copy()
+
+    px_df.columns = [str(c).upper().strip() for c in px_df.columns]
+    return px_df.dropna(how="all", axis=1).sort_index()
+
+
+@st.cache_data(show_spinner=False)
+def compute_daily_engine_from_monthly_weights(weights_m: pd.DataFrame):
+    tickers = sorted(set([c.upper() for c in weights_m.columns] + [BENCH_SP500, BENCH_NDX]))
+    px_d = download_prices(tickers, "2015-01-01", str(date.today()))
+    if px_d.empty:
+        return {
+            "portfolio_daily": pd.Series(dtype=float),
+            "sp500_daily": pd.Series(dtype=float),
+            "ndx_daily": pd.Series(dtype=float),
+            "weights_daily": pd.DataFrame(),
+            "weights_monthly_effective": pd.DataFrame(),
+            "prices_daily": pd.DataFrame(),
+        }
+
+    rets_d = px_d.pct_change()
+
+    w_effective_m = weights_m.shift(1).fillna(0.0)
+
+    day_to_month_end = pd.Series(
+        pd.DatetimeIndex(rets_d.index).to_period("M").to_timestamp(how="end").normalize(),
+        index=rets_d.index
+    )
+
+    w_daily = w_effective_m.reindex(day_to_month_end.values)
+    w_daily.index = rets_d.index
+    w_daily = w_daily.fillna(0.0)
+
+    common_cols = [c for c in w_daily.columns if c in rets_d.columns]
+    w_daily = w_daily[common_cols]
+    asset_rets_d = rets_d.reindex(columns=common_cols)
+
+    portfolio_daily = (w_daily * asset_rets_d).sum(axis=1)
+
+    if INCLUDE_TX_COST:
+        month_switch = day_to_month_end != day_to_month_end.shift(1)
+        month_switch.iloc[0] = False
+        dw = w_daily.diff().abs().sum(axis=1).fillna(0.0)
+        tx_cost = pd.Series(0.0, index=portfolio_daily.index)
+        tx_cost.loc[month_switch] = dw.loc[month_switch] * (TX_COST_BPS / 10000.0)
+        portfolio_daily = portfolio_daily - tx_cost
+
+    sp500_daily = rets_d[BENCH_SP500] if BENCH_SP500 in rets_d.columns else pd.Series(dtype=float)
+    ndx_daily = rets_d[BENCH_NDX] if BENCH_NDX in rets_d.columns else pd.Series(dtype=float)
+
+    portfolio_daily = portfolio_daily.dropna()
+    sp500_daily = sp500_daily.reindex(portfolio_daily.index)
+    ndx_daily = ndx_daily.reindex(portfolio_daily.index)
+    w_daily = w_daily.reindex(portfolio_daily.index).fillna(0.0)
+
+    return {
+        "portfolio_daily": portfolio_daily,
+        "sp500_daily": sp500_daily,
+        "ndx_daily": ndx_daily,
+        "weights_daily": w_daily,
+        "weights_monthly_effective": w_effective_m,
+        "prices_daily": px_d,
+    }
+
+
+def build_nav_and_returns(r: pd.Series, base: float = 100.0):
+    r = r.dropna()
+    if r.empty:
+        return pd.Series(dtype=float), pd.Series(dtype=float)
+    nav = base * (1 + r).cumprod()
+    ret = nav.pct_change()
+    ret.iloc[0] = r.iloc[0]
+    return nav, ret
+
+
+def ratio_nav_and_returns(r_val: pd.Series, r_bench: pd.Series, base: float = 100.0):
+    aligned = pd.concat([r_val, r_bench], axis=1).dropna()
+    if aligned.empty:
+        return pd.Series(dtype=float), pd.Series(dtype=float)
+
+    rv = aligned.iloc[:, 0].astype(float)
+    rb = aligned.iloc[:, 1].astype(float)
+
+    nav_v = base * (1 + rv).cumprod()
+    nav_b = base * (1 + rb).cumprod()
+
+    ratio = nav_v / nav_b
+    ratio_nav = base * (ratio / ratio.iloc[0])
+
+    ratio_ret = ratio_nav.pct_change()
+    ratio_ret.iloc[0] = (1 + rv.iloc[0]) / (1 + rb.iloc[0]) - 1
+    return ratio_nav, ratio_ret
+
+
+def max_dd(r: pd.Series) -> float:
+    r = r.dropna()
+    if r.empty:
+        return np.nan
+    wealth = (1 + r).cumprod()
+    dd = wealth / wealth.cummax() - 1
+    return float(dd.min())
+
+
+def get_return_metric_label_and_value(r: pd.Series):
+    r = r.dropna()
+    if r.empty:
+        return "Return", np.nan, np.nan
+
+    total_ret = (1 + r).prod() - 1
+
+    start = pd.Timestamp(r.index[0])
+    end = pd.Timestamp(r.index[-1])
+
+    days = (end - start).days
+    same_calendar_year = start.year == end.year
+    current_year = end.year == date.today().year
+
+    cagr = np.nan
+    if days >= 365:
+        years = days / 365.25
+        cagr = (1 + total_ret) ** (1 / years) - 1 if years > 0 else np.nan
+
+    if same_calendar_year and current_year:
+        return "YTD", total_ret, cagr
+
+    if days < 365:
+        return "Total Return", total_ret, cagr
+
+    return "CAGR", cagr, cagr
+
+
+def get_price_metric_label_and_value(price_series: pd.Series, window_start=None, window_end=None):
+    s = price_series.dropna().sort_index()
+    if s.empty or len(s) < 2:
+        return "Return", np.nan, np.nan
+
+    if window_end is not None:
+        s = s[s.index <= pd.Timestamp(window_end)]
+    if s.empty or len(s) < 2:
+        return "Return", np.nan, np.nan
+
+    visible = s.copy()
+    if window_start is not None:
+        visible = visible[visible.index >= pd.Timestamp(window_start)]
+    if visible.empty or len(visible) < 2:
+        return "Return", np.nan, np.nan
+
+    start = pd.Timestamp(visible.index[0])
+    end = pd.Timestamp(visible.index[-1])
+    days = (end - start).days
+    same_calendar_year = start.year == end.year
+    current_year = end.year == date.today().year
+
+    if same_calendar_year and current_year:
+        year_start = pd.Timestamp(year=end.year, month=1, day=1)
+        anchor = s[s.index < year_start]
+        current_year_prices = s[(s.index >= year_start) & (s.index <= end)]
+        if not anchor.empty and not current_year_prices.empty:
+            start_price = anchor.iloc[-1]
+            end_price = current_year_prices.iloc[-1]
+            total_ret = (end_price / start_price) - 1 if start_price != 0 else np.nan
+            return "YTD", total_ret, np.nan
+
+    total_ret = (visible.iloc[-1] / visible.iloc[0]) - 1
+
+    cagr = np.nan
+    if days >= 365:
+        years = days / 365.25
+        cagr = (visible.iloc[-1] / visible.iloc[0]) ** (1 / years) - 1 if years > 0 else np.nan
+
+    if days < 365:
+        return "Total Return", total_ret, cagr
+
+    return "CAGR", cagr, cagr
+
+
+def build_true_annual_returns_from_prices(price_series: pd.Series, window_start=None, window_end=None) -> pd.Series:
+    s = price_series.dropna().sort_index()
+    if s.empty or len(s) < 2:
+        return pd.Series(dtype=float)
+
+    if window_end is not None:
+        s = s[s.index <= pd.Timestamp(window_end)]
+    if s.empty or len(s) < 2:
+        return pd.Series(dtype=float)
+
+    start_year = pd.Timestamp(window_start).year if window_start is not None else int(s.index.min().year)
+    end_year = int(s.index.max().year)
+
+    out = {}
+    for y in range(start_year, end_year + 1):
+        prev = s[s.index < pd.Timestamp(f"{y}-01-01")]
+        cur = s[(s.index >= pd.Timestamp(f"{y}-01-01")) & (s.index <= pd.Timestamp(f"{y}-12-31"))]
+        if prev.empty or cur.empty:
+            continue
+        start_price = prev.iloc[-1]
+        end_price = cur.iloc[-1]
+        if pd.notna(start_price) and start_price != 0:
+            out[y] = (end_price / start_price) - 1
+
+    return pd.Series(out, dtype=float)
+
+
+def get_price_cumulative_return(price_series: pd.Series, window_start=None, window_end=None):
+    s = price_series.dropna().sort_index()
+    if s.empty or len(s) < 2:
+        return np.nan
+
+    if window_start is not None:
+        s = s[s.index >= pd.Timestamp(window_start)]
+    if window_end is not None:
+        s = s[s.index <= pd.Timestamp(window_end)]
+
+    if s.empty or len(s) < 2:
+        return np.nan
+
+    start_price = s.iloc[0]
+    end_price = s.iloc[-1]
+
+    if pd.isna(start_price) or pd.isna(end_price) or start_price == 0:
+        return np.nan
+
+    return (end_price / start_price) - 1
+
+
+def perf_extended_daily(r: pd.Series, bench=None) -> dict:
+    r = r.dropna()
+    if r.empty:
+        return {}
+
+    mu, sig = r.mean(), r.std()
+    cum_ret = (1 + r).prod() - 1
+
+    return_label, return_value, cagr = get_return_metric_label_and_value(r)
+
+    ann_vol = sig * np.sqrt(252) if sig and sig > 0 else np.nan
+    sharpe = mu / sig * np.sqrt(252) if sig and sig > 0 else np.nan
+
+    downside = r[r < 0]
+    downside_std = downside.std()
+    sortino = mu / downside_std * np.sqrt(252) if pd.notna(downside_std) and downside_std > 0 else np.nan
+
+    yr = (1 + r).resample("YE").prod() - 1
+    yr.index = yr.index.year
+    max_year = float(yr.max()) if not yr.empty else np.nan
+    worst_year = float(yr.min()) if not yr.empty else np.nan
+
+    beta = np.nan
+    if bench is not None and not bench.empty:
+        aligned = pd.concat([r, bench], axis=1).dropna()
+        if not aligned.empty:
+            y, x = aligned.iloc[:, 0], aligned.iloc[:, 1]
+            beta = stats.linregress(x, y).slope
+
+    return {
+        "CumulativeReturn": cum_ret,
+        "ReturnMetricLabel": return_label,
+        "ReturnMetricValue": return_value,
+        "CAGR": cagr,
+        "Sharpe": sharpe,
+        "Sortino": sortino,
+        "AnnVol": ann_vol,
+        "MaxDD": max_dd(r),
+        "Beta": beta,
+        "MaxYear": max_year,
+        "WorstYear": worst_year,
+    }
+
+
+def perf_daily_simple(r: pd.Series, bench=None) -> dict:
+    r = r.dropna()
+    if r.empty:
+        return {}
+
+    total_ret = (1 + r).prod() - 1
+    beta = np.nan
+    if bench is not None and not bench.empty:
+        aligned = pd.concat([r, bench], axis=1).dropna()
+        if not aligned.empty:
+            y, x = aligned.iloc[:, 0], aligned.iloc[:, 1]
+            beta = stats.linregress(x, y).slope
+
+    return {
+        "TotalReturn": total_ret,
+        "Beta": beta,
+    }
+
+
+def pct(x):
+    return f"{x:.2%}" if (x is not None and pd.notna(x)) else "—"
+
+
+def _safe_float(x):
+    return float(x) if (x is not None and pd.notna(x)) else np.nan
+
+
+def money(x):
+    return f"₪{x:,.0f}" if pd.notna(x) else "—"
+
+
+def usd(x):
+    return f"${x:,.0f}" if pd.notna(x) else "—"
+
+
+def gold_color_sequence(n: int):
+    palette = [
+        CLR_GOLD,
+        CLR_GOLD_LIGHT,
+        "#8c6d31",
+        "#c49a59",
+        "#6f5830",
+        "#dfc18f",
+        "#9a7740",
+        "#ead9ba",
+    ]
+    if n <= len(palette):
+        return palette[:n]
+    out = []
+    i = 0
+    while len(out) < n:
+        out.append(palette[i % len(palette)])
+        i += 1
+    return out
+
+
+# ================== PASSWORD GATE (FIXED) ==================
+def password_gate(key_name: str) -> bool:
+    auth_key = f"{key_name}_authenticated"
+
+    if st.session_state.get(auth_key, False):
+        return True
+
+    c1, c2, c3 = st.columns([1.5, 1, 1.5])
+    with c2:
+        st.markdown('<div class="silent-pw-wrap">', unsafe_allow_html=True)
+        entered_password = st.text_input(
+            "Password",
+            type="password",
+            key=key_name,
+            label_visibility="collapsed",
+            placeholder="Password"
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+    if entered_password == CONTENT_PASSWORD:
+        st.session_state[auth_key] = True
+        return True
+
+    return False
+
+
+# ================== FEES ==================
+def _daily_mgmt_rate(mgmt_ann: float) -> float:
+    return mgmt_ann / 252.0
+
+
+def apply_fee_model_hwm_daily(
+    r: pd.Series,
+    mgmt_ann: float = 0.0,
+    perf_fee: float = 0.0,
+    base: float = 100.0,
+):
+    r = r.dropna()
+    if r.empty:
+        return {
+            "nav_net": pd.Series(dtype=float),
+            "r_net": pd.Series(dtype=float),
+            "fees_daily": pd.DataFrame(),
+            "avg_fee_annual_pct_aum": np.nan,
+        }
+
+    mgmt_d = _daily_mgmt_rate(mgmt_ann)
+
+    nav_net = pd.Series(index=r.index, dtype=float)
+    fee_rows = []
+
+    prev_nav_net = float(base)
+    hwm = float(base)
+
+    for t, gross_ret in r.items():
+        gross_ret = float(gross_ret)
+
+        nav_after_gross = prev_nav_net * (1.0 + gross_ret)
+
+        mgmt_fee_amt = nav_after_gross * mgmt_d if mgmt_ann > 0 else 0.0
+        nav_after_mgmt = nav_after_gross - mgmt_fee_amt
+
+        gain_above_hwm = max(nav_after_mgmt - hwm, 0.0)
+        perf_fee_amt = gain_above_hwm * perf_fee if perf_fee > 0 else 0.0
+
+        nav_final = nav_after_mgmt - perf_fee_amt
+        nav_net.loc[t] = nav_final
+
+        if nav_final > hwm:
+            hwm = nav_final
+
+        fee_rows.append({
+            "Date": t,
+            "StartNAV": prev_nav_net,
+            "GrossReturn": gross_ret,
+            "NAVAfterGross": nav_after_gross,
+            "MgmtFee": mgmt_fee_amt,
+            "NAVAfterMgmt": nav_after_mgmt,
+            "GainAboveHWM": gain_above_hwm,
+            "PerfFee": perf_fee_amt,
+            "TotalFee": mgmt_fee_amt + perf_fee_amt,
+            "EndNAV": nav_final,
+            "HWMEnd": hwm,
+        })
+
+        prev_nav_net = nav_final
+
+    fees_daily = pd.DataFrame(fee_rows).set_index("Date")
+
+    r_net = nav_net.pct_change()
+    r_net.iloc[0] = nav_net.iloc[0] / base - 1.0
+
+    fee_pct_day = (fees_daily["TotalFee"] / fees_daily["StartNAV"]).replace([np.inf, -np.inf], np.nan).dropna()
+    avg_fee_annual_pct_aum = float(fee_pct_day.mean() * 252) if not fee_pct_day.empty else np.nan
+
+    return {
+        "nav_net": nav_net,
+        "r_net": r_net,
+        "fees_daily": fees_daily,
+        "avg_fee_annual_pct_aum": avg_fee_annual_pct_aum,
+    }
+
+
+def apply_perf_fee_hwm_only(r: pd.Series, perf_fee: float = 0.20, base: float = 100.0):
+    out = apply_fee_model_hwm_daily(r, mgmt_ann=0.0, perf_fee=perf_fee, base=base)
+    return out["nav_net"], out["r_net"], out["fees_daily"], out["avg_fee_annual_pct_aum"]
+
+
+def apply_mgmt_aum_plus_perf_hwm(r: pd.Series, mgmt_ann: float = 0.015, perf_fee: float = 0.15, base: float = 100.0):
+    out = apply_fee_model_hwm_daily(r, mgmt_ann=mgmt_ann, perf_fee=perf_fee, base=base)
+    return out["nav_net"], out["r_net"], out["fees_daily"], out["avg_fee_annual_pct_aum"]
+
+
+def apply_mgmt_fee_only(r: pd.Series, mgmt_ann: float = 0.018, base: float = 100.0):
+    out = apply_fee_model_hwm_daily(r, mgmt_ann=mgmt_ann, perf_fee=0.0, base=base)
+    return out["nav_net"], out["r_net"], out["fees_daily"], out["avg_fee_annual_pct_aum"]
+
+
+# ================== LOAD DATA ==================
+try:
+    weights = load_combined_weights(OUT / CSV_NAME)
+except FileNotFoundError as e:
+    st.error(str(e))
+    st.stop()
+
+engine = compute_daily_engine_from_monthly_weights(weights)
+
+gross_d = engine["portfolio_daily"]
+sp500_d = engine["sp500_daily"]
+ndx_d = engine["ndx_daily"]
+w_daily = engine["weights_daily"]
+px_daily = engine["prices_daily"]
+
+if gross_d.empty:
+    st.error("No daily portfolio data available.")
+    st.stop()
+
+min_dt = max(gross_d.index.min(), pd.Timestamp(f"{MIN_YEAR}-01-01"))
+max_dt = gross_d.index.max()
+
+
+# ================== SIDEBAR CONTROLS ==================
+with st.sidebar:
+    with st.expander("Controls", expanded=False):
+        month_start_options = build_month_start_options(min_dt, max_dt)
+
+        default_start_month = pd.Timestamp(min_dt).to_period("M").to_timestamp(how="start").normalize()
+        default_end_month = pd.Timestamp(max_dt).to_period("M").to_timestamp(how="start").normalize()
+
+        selected_months = st.select_slider(
+            "Analysis Window (Month Start)",
+            options=month_start_options,
+            value=(default_start_month, default_end_month),
+            format_func=lambda d: pd.Timestamp(d).strftime("%Y-%m-%d"),
+        )
+
+        selected_start_month, selected_end_month = selected_months
+
+        start_dt = pd.Timestamp(selected_start_month).normalize()
+        end_dt = (pd.Timestamp(selected_end_month) + pd.offsets.MonthEnd(0)).normalize()
+        end_dt = min(end_dt, max_dt.normalize())
+
+        show_ratio = st.toggle("NAV = Valeur / S&P 500 ", value=False)
+
+        fee_options = [
+            "Gross",
+            "Net: 1.5% mgmt on AUM + 15% perf (HWM)",
+            "Net: 20% perf only (HWM)",
+            "Net: 1.8% mgmt on AUM only",
+        ]
+        fee_mode = st.selectbox(
+            "Fees (Valeur only)",
+            options=fee_options,
+            index=0,
+            disabled=bool(show_ratio),
+        )
+
+        st.caption(f"As of: {end_dt.strftime('%Y-%m-%d')}")
+
+
+# ================== APPLY DAILY WINDOW ==================
+gross_w = gross_d[(gross_d.index >= start_dt) & (gross_d.index <= end_dt)]
+sp500_w = sp500_d.reindex(gross_w.index)
+ndx_w = ndx_d.reindex(gross_w.index)
+w_daily_w = w_daily.reindex(gross_w.index).fillna(0.0)
+
+sp500_px_daily = px_daily[BENCH_SP500].dropna() if BENCH_SP500 in px_daily.columns else pd.Series(dtype=float)
+ndx_px_daily = px_daily[BENCH_NDX].dropna() if BENCH_NDX in px_daily.columns else pd.Series(dtype=float)
+
+sp500_px_daily_w = sp500_px_daily[
+    (sp500_px_daily.index >= (start_dt - pd.DateOffset(years=1))) &
+    (sp500_px_daily.index <= end_dt)
+]
+ndx_px_daily_w = ndx_px_daily[
+    (ndx_px_daily.index >= (start_dt - pd.DateOffset(years=1))) &
+    (ndx_px_daily.index <= end_dt)
+]
+
+if gross_w.empty:
+    st.error("No returns in selected window.")
+    st.stop()
+
+
+# ================== CUSTOM HTML HELPERS ==================
+def metric_html(label: str, value: str) -> str:
+    return f"""
+    <div class="metric-box">
+        <div class="metric-label-custom">{label}</div>
+        <div class="metric-value-custom">{value}</div>
+    </div>
+    """
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_top_ticker_data():
+    instruments = {
+        "S&P 500": "^GSPC",
+        "Nasdaq-100": "^NDX",
+        "Dow Jones": "^DJI",
+        "US 10Y": "^TNX",
+        "Gold": "GC=F",
+        "Crude Oil": "CL=F",
+        "VIX": "^VIX",
+    }
+
+    rows = []
+    for label, ticker in instruments.items():
+        try:
+            hist = yf.download(
+                ticker,
+                period="5d",
+                interval="1h",
+                auto_adjust=False,
+                progress=False,
+                threads=False,
+            )
+            if hist is None or hist.empty or "Close" not in hist.columns:
+                continue
+
+            close = hist["Close"].dropna()
+            if close.empty:
+                continue
+
+            last_price = float(close.iloc[-1])
+            prev_price = float(close.iloc[-2]) if len(close) >= 2 else last_price
+            change_pct = ((last_price / prev_price) - 1.0) if prev_price else 0.0
+
+            rows.append({
+                "label": label,
+                "price": last_price,
+                "change_pct": change_pct,
+            })
+        except Exception:
+            continue
+
+    return rows
+
+
+def build_top_ticker_html():
+    data = get_top_ticker_data()
+    if not data:
+        return ""
+
+    items = []
+    repeated = data * 3
+    for item in repeated:
+        cls = "top-ticker-change-pos" if item["change_pct"] >= 0 else "top-ticker-change-neg"
+        sign = "+" if item["change_pct"] >= 0 else ""
+        items.append(
+            f'<span class="top-ticker-item">'
+            f'<span class="top-ticker-symbol">{item["label"]}</span>'
+            f'<span class="top-ticker-price">{item["price"]:,.2f}</span>'
+            f'<span class="{cls}">{sign}{item["change_pct"]:.2%}</span>'
+            f'</span>'
+        )
+    return "\n".join(items)
+
+
+def _render_top_ticker_html():
+    ticker_items = build_top_ticker_html()
+    if not ticker_items:
+        return
+
+    html = f"""
+    <html>
+    <head>
+    <style>
+    body {{
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        font-family: Inter, Arial, sans-serif;
+    }}
+    .top-ticker-outer {{
+        width: 100%;
+        overflow: hidden;
+        background: transparent;
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+        padding: 6px 0 2px 0;
+        box-sizing: border-box;
+        white-space: nowrap;
+    }}
+
+    .top-ticker-track {{
+        display: inline-block;
+        white-space: nowrap;
+        padding-left: 100%;
+        animation: topTickerMove 90s linear infinite;
+        will-change: transform;
+    }}
+
+    .top-ticker-item {{
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        margin-right: 34px;
+        font-size: 15px;
+        font-weight: 800;
+        color: #111111;
+        letter-spacing: 0.01em;
+    }}
+
+    .top-ticker-symbol {{
+        color: #111111;
+        font-weight: 900;
+    }}
+
+    .top-ticker-price {{
+        color: #111111;
+        font-weight: 900;
+    }}
+
+    .top-ticker-change-pos {{
+        color: #17b26a;
+        font-weight: 900;
+    }}
+
+    .top-ticker-change-neg {{
+        color: #f04438;
+        font-weight: 900;
+    }}
+
+    @keyframes topTickerMove {{
+        0% {{ transform: translateX(0%); }}
+        100% {{ transform: translateX(-100%); }}
+    }}
+    </style>
+    </head>
+    <body>
+        <div class="top-ticker-outer">
+            <div class="top-ticker-track">
+                {ticker_items}
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    components.html(html, height=58, scrolling=False)
+
+
+if hasattr(st, "fragment"):
+    @st.fragment(run_every="120s")
+    def render_top_ticker():
+        _render_top_ticker_html()
+else:
+    def render_top_ticker():
+        _render_top_ticker_html()
+
+
+# ================== TOP HEADER ==================
+render_top_ticker()
+
+st.markdown(
+    f"""
+    <div class="hero-wrap">
+        <div class="hero-main-title">Valeur Fund</div>
+        <div class="hero-tagline">{TAGLINE_LINE1} {TAGLINE_LINE2}</div>
+        <div class="hero-copy">
+            <span class="hero-bold">Valeur Fund</span> is a rules-based equity strategy built to pursue
+            <span class="hero-strong">compelling long-term compounding</span> through disciplined allocation,
+            institutional risk control, and a clear investment process.
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# ================== PAGE NAVIGATION ==================
+page = st.segmented_control(
+    "",
+    options=["Home", "Overview", "Holdings", "Daily Performance Range", "Downloads", "Equity Calculator"],
+    default="Home",
+    key="main_navigation",
+)
+
+
+# ================== PLOTTING BLOCKS ==================
+def valeur_plot_style(fig, height=650):
+    fig.update_layout(
+        template="plotly_white",
+        height=height,
+        margin=dict(l=8, r=8, t=6, b=6),
+        xaxis_rangeslider_visible=False,
+        hovermode="x unified",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor=CLR_BG,
+        font=dict(color=CLR_TEXT, size=15),
+        legend=dict(
+            bgcolor="rgba(255,255,255,0)",
+            font=dict(color=CLR_TEXT, size=13)
+        ),
+    )
+    fig.update_xaxes(
+        showgrid=True,
+        gridcolor=CLR_GRID,
+        zeroline=False,
+        linecolor=CLR_LINE,
+        tickfont=dict(size=13, color="#303030")
+    )
+    fig.update_yaxes(
+        showgrid=True,
+        gridcolor=CLR_GRID,
+        zeroline=False,
+        linecolor=CLR_LINE,
+        tickfont=dict(size=13, color="#303030")
+    )
+
+
+def candle_block_valeur(r_valeur: pd.Series, r_sp500: pd.Series, show_ratio: bool, fee_mode: str, height: int = 650):
+    r_valeur = r_valeur.dropna()
+    if r_valeur.empty:
+        st.info("No data for Valeur Fund")
+        return {
+            "r_used": pd.Series(dtype=float),
+            "nav_used": pd.Series(dtype=float),
+            "mode": "—",
+            "show_ratio": False,
+            "fees_daily": pd.DataFrame(),
+        }
+
+    if show_ratio:
+        nav_used, r_used = ratio_nav_and_returns(r_valeur, r_sp500, base=100.0)
+        y_title = "NAV (Valeur / S&P 500 )"
+        bench_for_beta = None
+        fee_pot = np.nan
+        fees_daily = pd.DataFrame()
+        title_text = "Valeur Fund Relative Performance"
+    else:
+        if fee_mode == "Gross":
+            nav_used, r_used = build_nav_and_returns(r_valeur, base=100.0)
+            fee_pot = 0.0
+            fees_daily = pd.DataFrame()
+        elif fee_mode == "Net: 1.5% mgmt on AUM + 15% perf (HWM)":
+            nav_used, r_used, fees_daily, fee_pot = apply_mgmt_aum_plus_perf_hwm(
+                r_valeur, mgmt_ann=0.015, perf_fee=0.15, base=100.0
+            )
+        elif fee_mode == "Net: 20% perf only (HWM)":
+            nav_used, r_used, fees_daily, fee_pot = apply_perf_fee_hwm_only(
+                r_valeur, perf_fee=0.20, base=100.0
+            )
+        elif fee_mode == "Net: 1.8% mgmt on AUM only":
+            nav_used, r_used, fees_daily, fee_pot = apply_mgmt_fee_only(
+                r_valeur, mgmt_ann=0.018, base=100.0
+            )
+        else:
+            nav_used, r_used = build_nav_and_returns(r_valeur, base=100.0)
+            fee_pot = 0.0
+            fees_daily = pd.DataFrame()
+
+        y_title = "NAV (log scale)"
+        bench_for_beta = r_sp500
+        title_text = "Valeur Fund Performance"
+
+    p = perf_extended_daily(r_used, bench=bench_for_beta)
+
+    st.markdown(f'<div class="big-page-title">{title_text}</div>', unsafe_allow_html=True)
+
+    row1 = st.columns(4, gap="medium")
+    with row1[0]:
+        st.markdown(metric_html("Cumulative Return", pct(p.get("CumulativeReturn"))), unsafe_allow_html=True)
+    with row1[1]:
+        st.markdown(metric_html(p.get("ReturnMetricLabel", "Return"), pct(p.get("ReturnMetricValue"))), unsafe_allow_html=True)
+    with row1[2]:
+        st.markdown(metric_html("Sharpe", f"{p.get('Sharpe', np.nan):.2f}" if p else "—"), unsafe_allow_html=True)
+    with row1[3]:
+        st.markdown(metric_html("Sortino", f"{p.get('Sortino', np.nan):.2f}" if p else "—"), unsafe_allow_html=True)
+
+    second_labels = [
+        ("Annual Vol", pct(p.get("AnnVol"))),
+        ("Max DD", pct(p.get("MaxDD"))),
+        ("Beta", "—" if bench_for_beta is None else (f"{p.get('Beta', np.nan):.2f}" if pd.notna(p.get("Beta", np.nan)) else "—")),
+    ]
+
+    if not show_ratio and fee_mode != "Gross":
+        second_labels.append(("Average Fees (% AUM)", pct(fee_pot)))
+
+    row2 = st.columns(len(second_labels), gap="medium")
+    for col, (lbl, val) in zip(row2, second_labels):
+        with col:
+            st.markdown(metric_html(lbl, val), unsafe_allow_html=True)
+
+    st.markdown('<div class="chart-title">Valeur Fund</div>', unsafe_allow_html=True)
+
+    nav_open = nav_used.shift(1)
+    nav_open.iloc[0] = nav_used.iloc[0]
+    df = pd.DataFrame({"Open": nav_open, "Close": nav_used}, index=nav_used.index)
+    df["High"] = df[["Open", "Close"]].max(axis=1)
+    df["Low"] = df[["Open", "Close"]].min(axis=1)
+
+    fig = go.Figure()
+    fig.add_trace(go.Candlestick(
+        x=df.index,
+        open=df["Open"],
+        high=df["High"],
+        low=df["Low"],
+        close=df["Close"],
+        increasing_line_color=CLR_GREEN,
+        decreasing_line_color=CLR_RED,
+        increasing_fillcolor=CLR_GREEN,
+        decreasing_fillcolor=CLR_RED,
+        name="Valeur"
+    ))
+    fig.update_yaxes(title=y_title, type="log")
+    valeur_plot_style(fig, height=height)
+    st.plotly_chart(fig, use_container_width=True, key=f"candle_valeur_{'ratio' if show_ratio else 'fees'}")
+
+    return {
+        "r_used": r_used,
+        "nav_used": nav_used,
+        "mode": fee_mode if not show_ratio else "NAV Ratio",
+        "show_ratio": bool(show_ratio),
+        "fees_daily": fees_daily,
+    }
+
+
+def candle_block_index(
+    r: pd.Series,
+    title: str,
+    bench=None,
+    height: int = 520,
+    price_series: pd.Series | None = None,
+    metric_window_start=None,
+    metric_window_end=None,
+):
+    r = r.dropna()
+    if r.empty:
+        st.info(f"No data for {title}")
+        return
+
+    nav, r_used = build_nav_and_returns(r, base=100.0)
+    p = perf_extended_daily(r_used, bench=bench)
+
+    if price_series is not None and len(price_series.dropna()) >= 2:
+        price_label, price_value, _ = get_price_metric_label_and_value(
+            price_series,
+            window_start=metric_window_start,
+            window_end=metric_window_end,
+        )
+        price_cum = get_price_cumulative_return(
+            price_series,
+            window_start=metric_window_start,
+            window_end=metric_window_end,
+        )
+        p["ReturnMetricLabel"] = price_label
+        p["ReturnMetricValue"] = price_value
+        p["CumulativeReturn"] = price_cum
+
+    metric_row = st.columns(4, gap="medium")
+    with metric_row[0]:
+        st.markdown(metric_html("Cumulative Return", pct(p.get("CumulativeReturn"))), unsafe_allow_html=True)
+    with metric_row[1]:
+        st.markdown(metric_html(p.get("ReturnMetricLabel", "Return"), pct(p.get("ReturnMetricValue"))), unsafe_allow_html=True)
+    with metric_row[2]:
+        st.markdown(metric_html("Annual Vol", pct(p.get("AnnVol"))), unsafe_allow_html=True)
+    with metric_row[3]:
+        st.markdown(metric_html("Max DD", pct(p.get("MaxDD"))), unsafe_allow_html=True)
+
+    st.markdown(f'<div class="subchart-title">{title}</div>', unsafe_allow_html=True)
+
+    nav_open = nav.shift(1)
+    nav_open.iloc[0] = nav.iloc[0]
+    df = pd.DataFrame({"Open": nav_open, "Close": nav}, index=nav.index)
+    df["High"] = df[["Open", "Close"]].max(axis=1)
+    df["Low"] = df[["Open", "Close"]].min(axis=1)
+
+    fig = go.Figure()
+    fig.add_trace(go.Candlestick(
+        x=df.index,
+        open=df["Open"],
+        high=df["High"],
+        low=df["Low"],
+        close=df["Close"],
+        increasing_line_color=CLR_GREEN,
+        decreasing_line_color=CLR_RED,
+        increasing_fillcolor=CLR_GREEN,
+        decreasing_fillcolor=CLR_RED,
+        name=title
+    ))
+    fig.update_yaxes(title="NAV (log scale)", type="log")
+    valeur_plot_style(fig, height=height)
+    st.plotly_chart(fig, use_container_width=True, key=f"candle_{title}")
+
+
+# ================== EQUITY CALCULATOR ==================
+def render_equity_calculator():
+    st.markdown('<div class="big-page-title">Equity Investor Calculator</div>', unsafe_allow_html=True)
+
+    if not password_gate("equity_password_input"):
+        return
+
+    perf_for_default = perf_extended_daily(gross_w, bench=sp500_w)
+    default_fund_return = perf_for_default.get("CAGR", np.nan)
+
+    if pd.isna(default_fund_return):
+        total_ret = perf_for_default.get("CumulativeReturn", np.nan)
+        default_fund_return = total_ret if pd.notna(total_ret) else 0.15
+
+    default_fund_return_pct = float(np.clip(default_fund_return * 100, 0.0, 100.0))
+
+    with st.expander("Equity Calculator Controls", expanded=False):
+        c1, c2, c3 = st.columns(3, gap="large")
+
+        with c1:
+            st.markdown('<div class="chart-title">Investment Terms</div>', unsafe_allow_html=True)
+            equity_investment = st.number_input("Equity investment amount (₪)", min_value=0.0, value=1_000_000.0, step=50_000.0)
+            investor_share_pct = st.slider("Share of net management fees (%)", 0.0, 100.0, 10.0, 0.5) / 100.0
+            projection_years = st.slider("Projection horizon (years)", 1, 10, 5, 1)
+
+        with c2:
+            st.markdown('<div class="chart-title">Business Assumptions</div>', unsafe_allow_html=True)
+            aum = st.number_input("Managed AUM (₪)", min_value=0.0, value=50_000_000.0, step=500_000.0)
+            net_mgmt_fee_pct = st.slider("Net management fee retained by the business (%)", 0.0, 10.0, 3.0, 0.1) / 100.0
+            aum_growth_pct = st.slider("Annual AUM growth assumption (%)", 0.0, 100.0, 18.0, 1.0) / 100.0
+
+        with c3:
+            st.markdown('<div class="chart-title">Fee Waiver Benefit</div>', unsafe_allow_html=True)
+            personal_capital = st.number_input("Initial personal capital managed with no fees (₪)", min_value=0.0, value=5_000_000.0, step=50_000.0)
+            waived_fee_pct = st.slider("Fee waived on personal capital (%)", 0.0, 10.0, 1.8, 0.1) / 100.0
+            fund_return_assumption = st.slider(
+                "Annual fund return assumption (%)",
+                0.0,
+                100.0,
+                float(round(default_fund_return_pct, 1)),
+                0.5
+            ) / 100.0
+
+    years = list(range(1, projection_years + 1))
+    proj_rows = []
+
+    current_aum = aum
+    current_personal_capital = personal_capital
+
+    for yr in years:
+        fee_pool_y = current_aum * net_mgmt_fee_pct
+        equity_income_y = fee_pool_y * investor_share_pct
+
+        current_personal_capital = current_personal_capital * (1 + fund_return_assumption)
+        fee_savings_y = current_personal_capital * waived_fee_pct
+        total_benefit_y = equity_income_y + fee_savings_y
+
+        proj_rows.append({
+            "Year": yr,
+            "AUM": current_aum,
+            "Annual Fee Pool": fee_pool_y,
+            "Annual Equity Income": equity_income_y,
+            "Free-Managed Capital": current_personal_capital,
+            "Annual Fee Savings": fee_savings_y,
+            "Total Annual Benefit": total_benefit_y,
+        })
+
+        current_aum = current_aum * (1 + aum_growth_pct)
+
+    proj_df = pd.DataFrame(proj_rows)
+
+    avg_annual_equity_income = proj_df["Annual Equity Income"].mean()
+    avg_annual_fee_savings = proj_df["Annual Fee Savings"].mean()
+    avg_annual_total_benefit = proj_df["Total Annual Benefit"].mean()
+
+    equity_yield_on_investment = avg_annual_equity_income / equity_investment if equity_investment > 0 else np.nan
+    economic_return_on_investment = avg_annual_total_benefit / equity_investment if equity_investment > 0 else np.nan
+    payback_period = equity_investment / avg_annual_equity_income if avg_annual_equity_income > 0 else np.nan
+
+    metric_row1 = st.columns(3, gap="medium")
+    with metric_row1[0]:
+        st.markdown(metric_html("Annual Equity Income", money(avg_annual_equity_income)), unsafe_allow_html=True)
+    with metric_row1[1]:
+        st.markdown(metric_html("Annual Fee Savings", money(avg_annual_fee_savings)), unsafe_allow_html=True)
+    with metric_row1[2]:
+        st.markdown(metric_html("Total Annual Benefit", money(avg_annual_total_benefit)), unsafe_allow_html=True)
+
+    metric_row2 = st.columns(3, gap="medium")
+    with metric_row2[0]:
+        st.markdown(metric_html("Economic Return on Investment", pct(economic_return_on_investment)), unsafe_allow_html=True)
+    with metric_row2[1]:
+        st.markdown(metric_html("Equity Yield on Investment", pct(equity_yield_on_investment)), unsafe_allow_html=True)
+    with metric_row2[2]:
+        st.markdown(metric_html("Payback Period", f"{payback_period:.2f}y" if pd.notna(payback_period) else "—"), unsafe_allow_html=True)
+
+    show_proj = proj_df.copy()
+    for c in ["AUM", "Annual Fee Pool", "Annual Equity Income", "Free-Managed Capital", "Annual Fee Savings", "Total Annual Benefit"]:
+        show_proj[c] = show_proj[c].map(money)
+
+    st.markdown('<div class="chart-title">Projection Table</div>', unsafe_allow_html=True)
+    st.dataframe(show_proj, use_container_width=True, hide_index=True)
+
+
+# ================== PAGES ==================
+if page == "Home":
+    st.markdown('<div class="section-title">Four Strategies, One Vision</div>', unsafe_allow_html=True)
+
+    c1, c2, c3, c4 = st.columns(4, gap="medium")
+
+    with c1:
+        st.markdown(
+            """
+            <div class="strategy-card">
+                <div class="strategy-card-title">Momentum</div>
+                <div class="strategy-divider"></div>
+                <div class="strategy-text">Capturing high-growth opportunities in trending markets.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with c2:
+        st.markdown(
+            """
+            <div class="strategy-card">
+                <div class="strategy-card-title">Fundamental</div>
+                <div class="strategy-divider"></div>
+                <div class="strategy-text">Sustainable growth through quality companies.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with c3:
+        st.markdown(
+            """
+            <div class="strategy-card">
+                <div class="strategy-card-title">Defensive</div>
+                <div class="strategy-divider"></div>
+                <div class="strategy-text">Balanced returns with capital protection.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with c4:
+        st.markdown(
+            """
+            <div class="strategy-card">
+                <div class="strategy-card-title">Stability</div>
+                <div class="strategy-divider"></div>
+                <div class="strategy-text">Preserving capital through market cycles.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown(
+        """
+        <div style="text-align:center; padding: 34px 0 6px 0;">
+
+        <div style="
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: rgba(0,0,0,0.38);
+        margin-bottom: 14px;
+        ">
+        Get In Touch
+        </div>
+
+        <div style="
+        font-size: 22px;
+        font-weight: 700;
+        color: #111111;
+        letter-spacing: -0.01em;
+        ">
+        <a href="mailto:contact@valeurfund.com" style="
+        color: #111111;
+        text-decoration: none;
+        transition: opacity 0.2s ease;
+        " onmouseover="this.style.opacity=0.6" onmouseout="this.style.opacity=1">
+        contact@valeurfund.com
+        </a>
+        </div>
+
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+elif page == "Overview":
+    valeur_out = candle_block_valeur(gross_w, sp500_w, show_ratio=show_ratio, fee_mode=fee_mode, height=620)
+
+    st.markdown('<div class="big-page-title">Benchmarks Performance</div>', unsafe_allow_html=True)
+
+    c1, c2 = st.columns(2, gap="large")
+    with c1:
+        candle_block_index(
+            sp500_w,
+            "S&P 500 ",
+            bench=sp500_w,
+            height=430,
+            price_series=sp500_px_daily_w,
+            metric_window_start=start_dt,
+            metric_window_end=end_dt,
+        )
+    with c2:
+        candle_block_index(
+            ndx_w,
+            "Nasdaq-100 ",
+            bench=sp500_w,
+            height=430,
+            price_series=ndx_px_daily_w,
+            metric_window_start=start_dt,
+            metric_window_end=end_dt,
+        )
+
+    st.markdown('<div class="section-title">Yearly Returns</div>', unsafe_allow_html=True)
+
+    if valeur_out["show_ratio"]:
+        valeur_for_bar = gross_w
+        valeur_label = "Valeur Fund"
+    else:
+        valeur_for_bar = valeur_out["r_used"]
+        valeur_label = f"Valeur Fund ({valeur_out['mode']})"
+
+    valeur_annual = (1 + valeur_for_bar.dropna()).resample("YE").prod() - 1
+    valeur_annual.index = valeur_annual.index.year
+
+    sp500_annual = build_true_annual_returns_from_prices(
+        sp500_px_daily_w,
+        window_start=start_dt,
+        window_end=end_dt,
+    )
+    ndx_annual = build_true_annual_returns_from_prices(
+        ndx_px_daily_w,
+        window_start=start_dt,
+        window_end=end_dt,
+    )
+
+    aret = pd.DataFrame({
+        valeur_label: valeur_annual,
+        "S&P 500 ": sp500_annual,
+        "Nasdaq-100 ": ndx_annual
+    }).sort_index()
+
+    aret.index = aret.index.astype(str)
+
+    fig_a = go.Figure()
+
+    yearly_colors = {
+        valeur_label: "#17b26a",
+        "S&P 500 ": "#f04438",
+        "Nasdaq-100 ": "#2563eb",
+    }
+
+    for col in aret.columns:
+        fig_a.add_trace(go.Bar(
+            x=aret.index,
+            y=aret[col],
+            name=col,
+            marker_color=yearly_colors.get(col, "#b08a45")
+        ))
+
+    fig_a.update_yaxes(tickformat=".2%")
+    fig_a.update_layout(
+        template="plotly_white",
+        barmode="group",
+        margin=dict(l=10, r=10, t=10, b=10),
+        xaxis=dict(title="Year", tickangle=0),
+        hovermode="x unified",
+        height=520,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor=CLR_BG,
+        font=dict(color=CLR_TEXT, size=14),
+    )
+    fig_a.update_xaxes(showgrid=True, gridcolor=CLR_GRID)
+    fig_a.update_yaxes(showgrid=True, gridcolor=CLR_GRID)
+    st.plotly_chart(fig_a, use_container_width=True, key="plotly_annual_returns_unified")
+
+elif page == "Holdings":
+    st.markdown('<div class="big-page-title">Holdings (Month-End Selection)</div>', unsafe_allow_html=True)
+
+    if password_gate("holdings_password_input"):
+        month_end_days = build_month_end_trading_days(w_daily_w.index)
+        month_end_options = [None] + month_end_days
+
+        sel_dt = st.selectbox(
+            "Select month-end",
+            options=month_end_options,
+            format_func=lambda d: "— Select month-end —" if d is None else pd.to_datetime(d).strftime("%Y-%m-%d"),
+            key="sel_month_end_unified",
+        )
+
+        if sel_dt is None:
+            st.info("Select a month-end date to display holdings.")
+        else:
+            w_sel = w_daily_w.loc[sel_dt]
+            w_sel = w_sel[w_sel > 0].sort_values(ascending=False)
+
+            if w_sel.empty:
+                st.info("No holdings available for this month-end.")
+            else:
+                show_df = w_sel.to_frame("Weight")
+                show_df.index.name = "Ticker"
+
+                st.dataframe(show_df.style.format({"Weight": "{:.2%}"}), use_container_width=True)
+
+                st.download_button(
+                    "Download selected month-end holdings CSV",
+                    data=show_df.to_csv().encode("utf-8"),
+                    file_name=f"holdings_{pd.to_datetime(sel_dt).strftime('%Y-%m-%d')}.csv",
+                    mime="text/csv",
+                    key="dl_holdings_selected_month_end",
+                )
+
+elif page == "Daily Performance Range":
+    st.markdown('<div class="big-page-title">Daily Performance Range</div>', unsafe_allow_html=True)
+
+    if gross_d.empty:
+        st.warning("No daily portfolio data available.")
+    else:
+        min_daily = gross_d.index.min().date()
+        max_daily = gross_d.index.max().date()
+
+        dc1, dc2 = st.columns(2)
+        with dc1:
+            daily_start = st.date_input(
+                "Start Date",
+                value=min_daily,
+                min_value=min_daily,
+                max_value=max_daily,
+                key="daily_start"
+            )
+        with dc2:
+            daily_end = st.date_input(
+                "End Date",
+                value=max_daily,
+                min_value=min_daily,
+                max_value=max_daily,
+                key="daily_end"
+            )
+
+        if daily_start > daily_end:
+            st.error("Start Date must be before End Date.")
+        else:
+            mask = (gross_d.index.date >= daily_start) & (gross_d.index.date <= daily_end)
+            r_val_d = gross_d.loc[mask]
+            r_sp_d = sp500_d.reindex(r_val_d.index)
+            r_ndx_d = ndx_d.reindex(r_val_d.index)
+
+            if r_val_d.empty:
+                st.warning("No daily returns in selected range.")
+            else:
+                initial_capital = 100000.0
+
+                nav_df = pd.DataFrame({
+                    "Valeur": initial_capital * (1 + r_val_d).cumprod(),
+                    "S&P 500": initial_capital * (1 + r_sp_d).cumprod(),
+                    "Nasdaq-100": initial_capital * (1 + r_ndx_d).cumprod(),
+                }).dropna(how="all")
+
+                final_valeur = nav_df["Valeur"].dropna().iloc[-1] if "Valeur" in nav_df.columns and not nav_df["Valeur"].dropna().empty else np.nan
+                final_sp500 = nav_df["S&P 500"].dropna().iloc[-1] if "S&P 500" in nav_df.columns and not nav_df["S&P 500"].dropna().empty else np.nan
+                final_ndx = nav_df["Nasdaq-100"].dropna().iloc[-1] if "Nasdaq-100" in nav_df.columns and not nav_df["Nasdaq-100"].dropna().empty else np.nan
+
+                st.markdown(
+                    f"""
+                    <div style="
+                        text-align:center;
+                        font-size:18px;
+                        font-weight:500;
+                        color:#3d3d3d;
+                        margin: 8px 0 20px 0;
+                        line-height:1.7;
+                    ">
+                        If <span style="font-weight:800;">$100,000</span> had been invested in each strategy/index on
+                        <span style="font-weight:800;">{daily_start}</span>, these would be the ending values as of
+                        <span style="font-weight:800;">{daily_end}</span>.
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                row1 = st.columns(4, gap="medium")
+                with row1[0]:
+                    st.markdown(metric_html("Valeur Ending Value", usd(final_valeur)), unsafe_allow_html=True)
+                with row1[1]:
+                    st.markdown(metric_html("S&P 500 Ending Value", usd(final_sp500)), unsafe_allow_html=True)
+                with row1[2]:
+                    st.markdown(metric_html("Nasdaq-100 Ending Value", usd(final_ndx)), unsafe_allow_html=True)
+                with row1[3]:
+                    st.markdown(metric_html("Period", f"{daily_start} → {daily_end}"), unsafe_allow_html=True)
+
+                st.markdown('<div class="chart-title">Hypothetical Growth of $100,000</div>', unsafe_allow_html=True)
+
+                fig_line = go.Figure()
+                line_colors = {
+                    "Valeur": "#17b26a",
+                    "S&P 500": "#f04438",
+                    "Nasdaq-100": "#2563eb",
+                }
+
+                for col in nav_df.columns:
+                    fig_line.add_trace(
+                        go.Scatter(
+                            x=nav_df.index,
+                            y=nav_df[col],
+                            mode="lines",
+                            name=col,
+                            line=dict(color=line_colors.get(col, CLR_GOLD), width=3)
+                        )
+                    )
+
+                fig_line.update_yaxes(title="Portfolio Value ($)", tickprefix="$")
+                valeur_plot_style(fig_line, height=520)
+                st.plotly_chart(fig_line, use_container_width=True, key="daily_perf_line_chart")
+
+elif page == "Downloads":
+    st.markdown('<div class="big-page-title">Downloads</div>', unsafe_allow_html=True)
+
+    if password_gate("downloads_password_input"):
+        st.download_button(
+            "Download combined CSV (normalized)",
+            data=weights.to_csv(float_format="%.8f").encode("utf-8"),
+            file_name="combined_weights_monthly_normalized.csv",
+            mime="text/csv",
+            key="dl_combined_norm",
+        )
+
+        st.markdown(
+            '<div class="small-note">If you updated weights/tickers, Streamlit may re-use cached prices until cache expires or code changes.</div>',
+            unsafe_allow_html=True,
+        )
+
+elif page == "Equity Calculator":
+    render_equity_calculator()
